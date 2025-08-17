@@ -228,6 +228,14 @@ def test_merge_splits() -> None:
     assert output == expected_output
 
 
+def test_join_encoded_docs() -> None:
+    splitter = CharacterTextSplitter(separator="", chunk_size=1, chunk_overlap=0)
+    splits = [[1, 2, 3], [4, 5, 6], [7, 8]]
+    separator = [0]
+    expected_output = [1, 2, 3, 0, 4, 5, 6, 0, 7, 8]
+    outputs = splitter._join_encoded_docs(splits, separator)
+    assert outputs == expected_output
+
 def test_create_documents() -> None:
     """Test create documents method."""
     texts = ["foo bar", "baz"]

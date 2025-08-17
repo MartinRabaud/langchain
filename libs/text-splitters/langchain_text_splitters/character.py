@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union, Callable, List
 
 from langchain_text_splitters.base import Language, TextSplitter
 
@@ -24,7 +24,8 @@ class CharacterTextSplitter(TextSplitter):
         """Split into chunks without re-inserting lookaround separators."""
         # 1. Determine split pattern: raw regex or escaped literal
         sep_pattern = (
-            self._separator if self._is_separator_regex else re.escape(self._separator)
+            self._separator if self._is_separator_regex else re.escape(
+                self._separator)
         )
 
         # 2. Initial split (keep separator if requested)
@@ -46,7 +47,13 @@ class CharacterTextSplitter(TextSplitter):
             merge_sep = self._separator
 
         # 5. Merge adjacent splits and return
-        return self._merge_splits(splits, merge_sep)
+        if not self._encoder_function or not self._decoder_function:
+            return self._merge_splits(splits, merge_sep)
+        else:
+            encoded_result = self._merge_encoded_splits(self._encoder_function(
+                splits), self._encoder_function([merge_sep])[0])
+            print(encoded_result)
+            return self._decoder_function(encoded_result)
 
 
 def _split_text_with_regex(
@@ -58,7 +65,8 @@ def _split_text_with_regex(
             # The parentheses in the pattern keep the delimiters in the result.
             _splits = re.split(f"({separator})", text)
             splits = (
-                ([_splits[i] + _splits[i + 1] for i in range(0, len(_splits) - 1, 2)])
+                ([_splits[i] + _splits[i + 1]
+                 for i in range(0, len(_splits) - 1, 2)])
                 if keep_separator == "end"
                 else ([_splits[i] + _splits[i + 1] for i in range(1, len(_splits), 2)])
             )
@@ -108,10 +116,11 @@ class RecursiveCharacterTextSplitter(TextSplitter):
                 break
             if re.search(_separator, text):
                 separator = _s
-                new_separators = separators[i + 1 :]
+                new_separators = separators[i + 1:]
                 break
 
-        _separator = separator if self._is_separator_regex else re.escape(separator)
+        _separator = separator if self._is_separator_regex else re.escape(
+            separator)
         splits = _split_text_with_regex(
             text, _separator, keep_separator=self._keep_separator
         )

@@ -35,6 +35,10 @@ class TextSplitter(BaseDocumentTransformer, ABC):
         chunk_size: int = 4000,
         chunk_overlap: int = 200,
         length_function: Callable[[str], int] = len,
+        encoder_function: Optional[Callable[[
+            list[str]], list[list[int]]]] = None,
+        decoder_function: Optional[Callable[[
+            list[list[int]]], list[str]]] = None,
         keep_separator: Union[bool, Literal["start", "end"]] = False,  # noqa: FBT001,FBT002
         add_start_index: bool = False,  # noqa: FBT001,FBT002
         strip_whitespace: bool = True,  # noqa: FBT001,FBT002
@@ -66,6 +70,8 @@ class TextSplitter(BaseDocumentTransformer, ABC):
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
         self._length_function = length_function
+        self._encoder_function = encoder_function
+        self._decoder_function = decoder_function
         self._keep_separator = keep_separator
         self._add_start_index = add_start_index
         self._strip_whitespace = strip_whitespace
@@ -102,6 +108,60 @@ class TextSplitter(BaseDocumentTransformer, ABC):
             metadatas.append(doc.metadata)
         return self.create_documents(texts, metadatas=metadatas)
 
+    def _join_encoded_docs(
+        self, docs: list[list[int]], separator: list[int]
+    ) -> Optional[list[int]]:
+        encoded_text: Optional[list[int]] = []
+        for i, d in enumerate(docs):
+            encoded_text.extend(d)
+            if i < len(docs) - 1:
+                encoded_text.extend(separator)
+        if len(encoded_text) == 0:
+            return None
+        return encoded_text
+
+    def _merge_encoded_splits(self, splits: list[list[int]], separator: list[int]) -> list[list[int]]:
+        # We now want to combine these smaller pieces into medium size
+        # chunks to send to the LLM.
+        separator_len = len(separator)
+        docs: list[list[int]] = []
+        current_doc: list[list[int]] = []
+        total = 0
+        for d in splits:
+            _len = len(d)
+            if (
+                total + _len + (separator_len if len(current_doc) > 0 else 0)
+                > self._chunk_size
+            ):
+                if total > self._chunk_size:
+                    logger.warning(
+                        f"Created a chunk of size {total}, "
+                        f"which is longer than the specified {self._chunk_size}"
+                    )
+                if len(current_doc) > 0:
+                    doc = self._join_encoded_docs(current_doc, separator)
+                    if doc is not None:
+                        docs.append(doc)
+                    # Keep on popping if:
+                    # - we have a larger chunk than in the chunk overlap
+                    # - or if we still have any chunks and the length is long
+                    while total > self._chunk_overlap or (
+                        total + _len +
+                            (separator_len if len(current_doc) > 0 else 0)
+                        > self._chunk_size
+                        and total > 0
+                    ):
+                        total -= len(current_doc[0]) + (
+                            separator_len if len(current_doc) > 1 else 0
+                        )
+                        current_doc = current_doc[1:]
+            current_doc.append(d)
+            total += _len + (separator_len if len(current_doc) > 1 else 0)
+        doc = self._join_encoded_docs(current_doc, separator)
+        if doc is not None:
+            docs.append(doc)
+        return docs
+
     def _join_docs(self, docs: list[str], separator: str) -> Optional[str]:
         text = separator.join(docs)
         if self._strip_whitespace:
@@ -137,7 +197,8 @@ class TextSplitter(BaseDocumentTransformer, ABC):
                     # - we have a larger chunk than in the chunk overlap
                     # - or if we still have any chunks and the length is long
                     while total > self._chunk_overlap or (
-                        total + _len + (separator_len if len(current_doc) > 0 else 0)
+                        total + _len +
+                            (separator_len if len(current_doc) > 0 else 0)
                         > self._chunk_size
                         and total > 0
                     ):
@@ -164,8 +225,21 @@ class TextSplitter(BaseDocumentTransformer, ABC):
                 )
                 raise ValueError(msg)
 
-            def _huggingface_tokenizer_length(text: str) -> int:
-                return len(tokenizer.tokenize(text))
+            def _encoder_function(
+                texts: Iterable[str]
+            ) -> list[list[int]]:
+                """Encode a list of texts into a list of token ids."""
+                return tokenizer(
+                    texts,
+                    padding=False,
+                    truncation=False,
+                )['input_ids']
+
+            def _decoder_function(
+                token_ids: list[list[int]]
+            ) -> list[str]:
+                """Decode a list of token ids into a list of texts."""
+                return tokenizer.batch_decode(token_ids, skip_special_tokens=True)
 
         except ImportError as err:
             msg = (
@@ -173,7 +247,7 @@ class TextSplitter(BaseDocumentTransformer, ABC):
                 "Please install it with `pip install transformers`."
             )
             raise ValueError(msg) from err
-        return cls(length_function=_huggingface_tokenizer_length, **kwargs)
+        return cls(encoder_function=_encoder_function, decoder_function=_decoder_function, **kwargs)
 
     @classmethod
     def from_tiktoken_encoder(

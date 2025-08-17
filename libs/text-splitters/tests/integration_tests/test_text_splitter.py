@@ -40,6 +40,27 @@ def test_huggingface_tokenizer() -> None:
     assert output == ["foo", "bar"]
 
 
+def test_long_huggingface_tokenizer() -> None:
+    """Test text splitter that uses a HuggingFace tokenizer."""
+    from transformers import GPT2TokenizerFast
+
+    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+    text_splitter = CharacterTextSplitter.from_huggingface_tokenizer(
+        tokenizer, separator=" ", chunk_size=4, chunk_overlap=1
+    )
+    lang_chain_intro = """LangChain is a framework for developing applications powered by large language models (LLMs).
+
+    LangChain simplifies every stage of the LLM application lifecycle:
+
+    Development: Build your applications using LangChain's open-source components and third-party integrations. Use LangGraph to build stateful agents with first-class streaming and human-in-the-loop support.
+    Productionization: Use LangSmith to inspect, monitor and evaluate your applications, so that you can continuously optimize and deploy with confidence.
+    Deployment: Turn your LangGraph applications into production-ready APIs and Assistants with LangGraph Platform.
+    """
+    output = text_splitter.split_text(lang_chain_intro)
+    assert output == ['LangChain', 'is a', 'a framework', 'framework for', 'for developing', 'applications', 'powered by', 'by large', 'large language', 'language models', '(LLMs).\n\n', 'LangChain', 'simplifies', 'every stage', 'stage of', 'of the', 'the LLM', 'application', 'lifecycle:\n\n', 'Development: Build', 'Build your', 'applications', 'using', "LangChain's", 'open-source', 'components and', 'third-party', 'integrations.', 'Use', 'LangGraph', 'to build', 'build stateful',
+                      'agents with', 'first-class', 'streaming and', 'human-in-the-loop', 'support.\n', 'Productionization:', 'Use', 'LangSmith', 'to', 'inspect,', 'monitor and', 'and evaluate', 'evaluate your', 'applications,', 'so that', 'that you', 'you can', 'can continuously', 'optimize and', 'and deploy', 'with', 'confidence.\n', 'Deployment:', 'Turn your', 'LangGraph', 'applications', 'into', 'production-ready', 'APIs and', 'Assistants', 'with', 'LangGraph', 'Platform.\n']
+
+
 def test_token_text_splitter() -> None:
     """Test no overlap."""
     splitter = TokenTextSplitter(chunk_size=5, chunk_overlap=0)
@@ -57,7 +78,8 @@ def test_token_text_splitter_overlap() -> None:
 
 
 def test_token_text_splitter_from_tiktoken() -> None:
-    splitter = TokenTextSplitter.from_tiktoken_encoder(model_name="gpt-3.5-turbo")
+    splitter = TokenTextSplitter.from_tiktoken_encoder(
+        model_name="gpt-3.5-turbo")
     expected_tokenizer = "cl100k_base"
     actual_tokenizer = splitter._tokenizer.name
     assert expected_tokenizer == actual_tokenizer
@@ -92,7 +114,8 @@ def test_sentence_transformers_multiple_tokens(sentence_transformers: Any) -> No
     splitter = SentenceTransformersTokenTextSplitter(chunk_overlap=0)
     text = "Lorem "
 
-    text_token_count_including_start_and_stop_tokens = splitter.count_tokens(text=text)
+    text_token_count_including_start_and_stop_tokens = splitter.count_tokens(
+        text=text)
     count_start_and_end_tokens = 2
     token_multiplier = (
         count_start_and_end_tokens
@@ -112,9 +135,11 @@ def test_sentence_transformers_multiple_tokens(sentence_transformers: Any) -> No
     expected_number_of_chunks = 2
 
     assert expected_number_of_chunks == len(text_chunks)
-    actual = splitter.count_tokens(text=text_chunks[1]) - count_start_and_end_tokens
+    actual = splitter.count_tokens(
+        text=text_chunks[1]) - count_start_and_end_tokens
     expected = (
-        token_multiplier * (text_token_count_including_start_and_stop_tokens - 2)
+        token_multiplier *
+        (text_token_count_including_start_and_stop_tokens - 2)
         - splitter.maximum_tokens_per_chunk
     )
     assert expected == actual
