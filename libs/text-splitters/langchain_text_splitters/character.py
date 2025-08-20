@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Literal, Optional, Union, Callable, List
+from dataclasses import dataclass
 
 from langchain_text_splitters.base import Language, TextSplitter
 
@@ -146,6 +147,83 @@ class RecursiveCharacterTextSplitter(TextSplitter):
             final_chunks.extend(merged_text)
         return final_chunks
 
+    def split_encoded_text(self, encoded_text: list[int], separator: list[int]) -> list[list[int]]:
+        result: list[list[int]] = []
+        start = 0
+        index = 0
+        print("Splitting encoded text with separator:", separator)
+        while index <= len(encoded_text) - len(separator):
+            print("Check", encoded_text[index:index + len(separator)],
+                  separator, encoded_text[start:index + len(separator)] == separator)
+            if encoded_text[index:index + len(separator)] == separator:
+                result.append(encoded_text[start:index])
+                index += len(separator)
+                start = index
+            else:
+                index += 1
+        result.append(encoded_text[start:])
+        return result
+
+    def _sub_array_in_array(
+        self, array: list[int], sub_array: list[int]
+    ) -> bool:
+        """Check if sub_array is in array."""
+        for i in range(len(array) - len(sub_array) + 1):
+            if array[i:i + len(sub_array)] == sub_array:
+                return True
+        return False
+
+    def recursive_encoded_splits(self, encoded_text: list[int], separators: list[list[int]]):
+        final_chunks: list[list[int]] = []
+        separator = separators[-1]
+        new_separators = []
+        for i, _s in enumerate(separators):
+            print("Checking separator", _s, "in",
+                  encoded_text, _s in encoded_text)
+            if self._sub_array_in_array(encoded_text, _s):
+                separator = _s
+                new_separators = separators[i + 1:]
+                break
+
+        splits = self.split_encoded_text(encoded_text, separator)
+
+        _good_splits: list[list[int]] = []
+        for s in splits:
+            print(s, self._chunk_size)
+            if len(s) < self._chunk_size:
+                _good_splits.append(s)
+            else:
+                if _good_splits:
+                    merged_text = self._merge_encoded_splits(
+                        _good_splits, separator)
+                    final_chunks.extend(merged_text)
+                    _good_splits = []
+                if not new_separators:
+                    final_chunks.append(s)
+                else:
+                    other_info = self.recursive_encoded_splits(
+                        s, new_separators)
+                    final_chunks.extend(other_info)
+            print(_good_splits, final_chunks)
+        if _good_splits:
+            merged_text = self._merge_encoded_splits(_good_splits, separator)
+            final_chunks.extend(merged_text)
+        return final_chunks
+
+    def encoded_splits(self, text: str, separators: list[str]):
+        if (self._encoder_function is None or
+                self._decoder_function is None):
+            raise ValueError(
+                "Encoder function is not set. Cannot encode splits.")
+        encoded_separators = self._encoder_function(separators)
+        pattern = f"({'|'.join(map(re.escape, separators))})"
+        parts = re.split(pattern, text)
+        encoded_parts = self._encoder_function(parts)
+        encoded_text = [x for sub in encoded_parts for x in sub]
+        print()
+        print(parts, encoded_parts, encoded_text)
+        return self._decoder_function(self.recursive_encoded_splits(encoded_text, encoded_separators))
+
     def split_text(self, text: str) -> list[str]:
         """Split the input text into smaller chunks based on predefined separators.
 
@@ -155,7 +233,10 @@ class RecursiveCharacterTextSplitter(TextSplitter):
         Returns:
             List[str]: A list of text chunks obtained after splitting.
         """
-        return self._split_text(text, self._separators)
+        if self._encoder_function is not None:
+            return self.encoded_splits(text, self._separators)
+        else:
+            return self._split_text(text, self._separators)
 
     @classmethod
     def from_language(
